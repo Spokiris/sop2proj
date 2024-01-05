@@ -5,6 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#define PIPE_BUFFER 40
+
 int parse_uint(int fd, unsigned int *value, char *next) {
   char buf[16];
 
@@ -73,6 +75,42 @@ int print_str(int fd, const char *str) {
 
     str += (size_t)written;
     len -= (size_t)written;
+  }
+
+  return 0;
+}
+
+int send_int(int fd, int value) {
+  if (write(fd, &value, sizeof(int)) == -1) {
+    perror("ACK failed");
+    return 1;
+  }
+
+  return 0;
+}
+
+int send_string(int fd, char* string) {
+  if (write(fd, string, PIPE_BUFFER) == -1) {
+    perror("ACK failed");
+    return 1;
+  }
+
+  return 0;
+}
+
+int send_uint_array(int fd, unsigned int* array, size_t size) {
+  if (write(fd, array, size * sizeof(unsigned int)) == -1) {
+    perror("ACK failed");
+    return 1;
+  }
+
+  return 0;
+}
+
+int send_sizet(int fd, size_t value) {
+  if (write(fd, &value, sizeof(size_t)) == -1) {
+    perror("ACK failed");
+    return 1;
   }
 
   return 0;

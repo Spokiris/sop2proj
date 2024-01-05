@@ -11,8 +11,29 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <string.h>
+
+#include <fcntl.h>
+
 #define PIPE_BUF 40
 #define MAX_SESSIONS 1
+
+typedef struct {
+    int client_id;
+    int request_fd;
+    int response_fd;
+    const char *req_pipe_name;
+    const char *resp_pipe_name;
+} client_t;
+
+
+client_t sessions[MAX_SESSIONS];
+int num_sessions = sizeof(sessions) / sizeof(client_t);
+
+int server_fd;
+
+
+
 
 void create_named_pipe(const char *pipe_name) {
     if (mkfifo(pipe_name, 0666) == -1) {
@@ -20,6 +41,135 @@ void create_named_pipe(const char *pipe_name) {
         exit(EXIT_FAILURE);
     }
 }
+
+void cli_init(int sv_fd) {
+  client_t client;
+  if(read(sv_fd, &client.req_pipe_name, sizeof(char)) == -1 || read(sv_fd, &client.resp_pipe_name, sizeof(char)) == -1){
+      perror("read setup request data");
+      return;
+  }
+
+    printf("Request pipe name: %s\n", client.req_pipe_name);
+    printf("Response pipe name: %s\n", client.resp_pipe_name);
+  if(mkfifo(client.req_pipe_name, O_WRONLY) == -1 || mkfifo(client.resp_pipe_name, O_RDONLY) == -1){
+      perror("Erro ao criar o named pipe");
+      exit(EXIT_FAILURE);
+  }
+
+  client.request_fd = open(client.req_pipe_name, O_WRONLY);
+  if (client.request_fd == -1) {
+      perror("open request pipe");
+      return;
+  }
+
+  client.response_fd = open(client.resp_pipe_name, O_RDONLY);
+  if (client.response_fd == -1) {
+      perror("open response pipe");
+      return;
+  }
+
+  client.client_id = num_sessions;
+  sessions[num_sessions] = client; //MAYBEFIXME
+
+  if (write(client.response_fd, &client.client_id, sizeof(int)) == -1) {
+      perror("write setup response");
+      return;
+  }
+  num_sessions++;
+  while (1) {
+    if(process_client_request(client.request_fd, client.response_fd)){
+      exit(EXIT_SUCCESS);
+    }
+  }
+}
+
+
+
+int process_client_request(int request_fd, int response_fd) {
+    char op_code;
+    unsigned int event_id;
+    size_t num_rows, num_cols;
+    size_t num_seats;
+    // Ler o código da operação
+    if (read(request_fd, &op_code, sizeof(char)) == -1) {
+        perror("read op_code");
+        return 0;
+    }
+
+    // Dependendo do código da operação, ler os dados relevantes do pedido do cliente
+    switch (op_code) {
+        case 2: // Quit
+          close(request_fd);
+          close(response_fd);
+            return 1;
+        case 3: // Create
+            // Ler os dados do pedido de create
+            if (read(request_fd, &event_id, sizeof(unsigned int)) == -1 ||
+                read(request_fd, &num_rows, sizeof(size_t)) == -1 ||
+                read(request_fd, &num_cols, sizeof(size_t)) == -1) {
+                perror("read create request data");
+                return 0;
+            }
+            // Realizar a operação de criação de evento e enviar a resposta
+            // Exemplo:
+            int create_result = ems_create(event_id, num_rows, num_cols); // Use a lógica da sua função ems_create
+            if (write(response_fd, &create_result, sizeof(int)) == -1) {
+                perror("write create response");
+                return 0;
+            }
+            return 0;
+        case 4: // Reserve
+
+            if (read(request_fd, &event_id, sizeof(unsigned int)) == -1 ||
+                read(request_fd, &num_seats, sizeof(size_t)) == -1) {
+                perror("read reserve request data");
+                return 0;
+            }
+            size_t *xs = malloc(num_seats * sizeof(size_t));
+            size_t *ys = malloc(num_seats * sizeof(size_t));
+            if (read(request_fd, xs, num_seats * sizeof(size_t)) == -1 ||
+                read(request_fd, ys, num_seats * sizeof(size_t)) == -1) {
+                perror("read reserve request data");
+                return 0;
+            }
+
+            int reserve_result = ems_reserve(event_id, num_seats, xs, ys); 
+            if (write(response_fd, &reserve_result, sizeof(int)) == -1) {
+                perror("write reserve response");
+                return 0;
+            }
+            return 0;
+        case 5: // Show
+
+            if (read(request_fd, &event_id, sizeof(unsigned int)) == -1) {
+                perror("read show request data");
+                return 0;
+            }
+
+            int show_result = ems_show(response_fd, event_id); // Use a lógica da sua função ems_show
+            if (write(response_fd, &show_result, sizeof(int)) == -1) {
+                perror("write show response");
+                return 0;
+            }
+
+        case 6: // List Events
+            // Implementar lógica para lidar com o pedido de listagem de eventos
+            if(read(request_fd, &event_id, sizeof(unsigned int)) == -1){
+                perror("read list events request data");
+                return 0;
+            }
+            int list_result = ems_list_events(response_fd);
+            if(write(response_fd, &list_result, sizeof(int)) == -1){
+                perror("write list events response");
+                return 0;
+            }
+            return 0;
+        default:
+            perror("Invalid operation code");
+            return 0;
+    }
+}
+
 
 int main(int argc, char* argv[]) {
   if (argc < 2 || argc > 3) {
@@ -50,44 +200,23 @@ int main(int argc, char* argv[]) {
   // Criando o named pipe
   create_named_pipe(sv_pipe_name);
   
-  
-  int client_fd = open(sv_pipe_name, 0666);
+
+  server_fd = open(sv_pipe_name, 0666);
   char request[PIPE_BUF];
-
-
-
-  // Código para lidar com as solicitações dos clientes
-  int num_sessions = 0;
-
-
-  //TODO: Intialize server, create worker threads
- 
- int rx = open(sv_pipe_name, 0444);
-  if (rx == -1) {
-    perror("Erro ao abrir o named pipe");
-    exit(EXIT_FAILURE);
-  }
- 
- 
- while (1) {
-    //TODO: Read from pipe
-    char buffer[PIPE_BUF];
-    ssize_t ret = read(rx, buffer, PIPE_BUF - 1);
-
-    if(ret == 0) {
-      //EOF
-      break;
-    } else if (ret == -1) {
-      perror("Erro ao ler do named pipe");
-      exit(EXIT_FAILURE);
+  memset(request, '0', PIPE_BUF);
+  
+  while (read(server_fd, request, sizeof(int)) != sizeof(int)) {
+    continue;
     }
+    printf("Received request\n");
+  cli_init(server_fd);
 
 
-
+    //TODO: Read from pipe
+    
     //TODO: Write new client to the producer-consumer buffer
 
 
-  }
 
   //TODO: Close Server
 

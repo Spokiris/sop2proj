@@ -9,26 +9,6 @@ int request_fd, response_fd, server_fd;
 int session_id;
 
 int ems_setup(char const* req_pipe_path, char const* resp_pipe_path, char const* server_pipe_path) {
-  //TODO: create pipes and connect to the server
-  if(mkfifo(req_pipe_path, 0666) == -1 || mkfifo(resp_pipe_path, 0666) == -1){
-    perror("Erro ao criar o named pipe");
-    return 1;
-  }
-
-  // Open the request pipe for writing
-  request_fd = open(req_pipe_path, __O_TMPFILE|O_WRONLY);
-  if (request_fd == -1) {
-    perror("open request pipe");
-    return 1;
-  }
-
-  // Open the response pipe for reading
-  response_fd = open(resp_pipe_path, __O_TMPFILE | O_RDONLY);
-  if (response_fd == -1) {
-    perror("open response pipe");
-    return 1;
-  }
-
   // Open the server pipe for writing
   server_fd = open(server_pipe_path, O_WRONLY);
   if (server_fd == -1) {
@@ -38,9 +18,10 @@ int ems_setup(char const* req_pipe_path, char const* resp_pipe_path, char const*
 
   // Send a setup request to the server
   int op_code = 1;
-  char req_pipe[40], resp_pipe[40];
-  size_t setup_req[2] = {req_pipe, resp_pipe};
-  if (write(request_fd, &op_code, sizeof(int)) == -1 || write(request_fd, &setup_req, sizeof(setup_req)) == -1) {
+  size_t con_setup_req[2] = {req_pipe_path, resp_pipe_path};
+  printf("Request pipe name: %s\n", con_setup_req[0]);
+  printf("Response pipe name: %s\n", con_setup_req[1]);
+  if (write(server_fd, &op_code, sizeof(int)) == -1 || write(server_fd, &con_setup_req, sizeof(con_setup_req)) == -1) {
     perror("write setup request");
     return 1;
   }
