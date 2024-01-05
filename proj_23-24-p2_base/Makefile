@@ -28,7 +28,7 @@ run: server/ems
 
 clean:
 	rm -f common/*.o client/*.o server/*.o server/ems client/client
-	rm sv req resp
+
 	
 
 format:
